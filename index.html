@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fun Republik · Reservas</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background:#0b0f19; color:#eef2ff; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 20px; }
+    .card { background:#111827; border:1px solid #1f2937; border-radius:16px; padding:16px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    p { margin: 0 0 14px; color:#c7d2fe; line-height: 1.35; }
+    label { display:block; font-size: 13px; color:#c7d2fe; margin: 10px 0 6px; }
+    select, input[type="date"] { width:100%; padding:12px; border-radius:12px; border:1px solid #334155; background:#0b1220; color:#eef2ff; }
+    button { width:100%; padding:12px; margin-top: 12px; border:0; border-radius:12px; background:#4f46e5; color:white; font-weight:600; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .slots { display:flex; flex-wrap:wrap; gap:10px; margin-top: 14px; }
+    .slot { padding:10px 12px; border-radius:999px; border:1px solid #334155; background:#0b1220; color:#eef2ff; cursor:pointer; }
+    .slot:hover { border-color:#818cf8; }
+    .note { font-size: 12px; color:#a5b4fc; margin-top: 10px; }
+    .err { color:#fecaca; margin-top: 10px; font-size: 13px; }
+    .ok { color:#bbf7d0; margin-top: 10px; font-size: 13px; }
+    .footer { margin-top: 14px; font-size: 12px; color:#94a3b8; }
+    .pill { display:inline-block; padding:6px 10px; border-radius:999px; background:#0b1220; border:1px solid #334155; color:#c7d2fe; font-size:12px; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Reservar barco · Fun Republik</h1>
+      <p>Elige 1 o 2 barcos y la duración. Después selecciona un día y verás las horas disponibles en tiempo real.</p>
+
+      <div class="row">
+        <div>
+          <label for="boats">Número de barcos</label>
+          <select id="boats">
+            <option value="1">1 barco</option>
+            <option value="2">2 barcos</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="duration">Duración</label>
+          <select id="duration">
+            <option value="2">2 horas</option>
+            <option value="3">3 horas</option>
+            <option value="4" selected>4 horas</option>
+            <option value="6">6 horas</option>
+            <option value="8">8 horas</option>
+          </select>
+        </div>
+      </div>
+
+      <label for="date">Día</label>
+      <input id="date" type="date" />
+
+      <button id="checkBtn">Ver horas disponibles</button>
+
+      <div class="note">
+        <span class="pill">Horario: 10:00–18:00</span>
+        <span class="pill">Turnos a en punto</span>
+        <span class="pill">Vuelta al muelle a las 18:00</span>
+      </div>
+
+      <div id="status"></div>
+      <div id="slots" class="slots"></div>
+
+      <div class="footer">
+        Al seleccionar una hora, en el siguiente paso pediremos nombre y personas y luego se realizará el pago del depósito.
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ✅ CAMBIA ESTA LÍNEA por tu URL real del webhook (sin la query)
+  // Ejemplo: "https://TU-N8N.railway.app/webhook/fr-availability"
+  const N8N_AVAILABILITY_URL = "PEGA_AQUI_TU_URL_DEL_WEBHOOK";
+
+  const boatsEl = document.getElementById("boats");
+  const durationEl = document.getElementById("duration");
+  const dateEl = document.getElementById("date");
+  const checkBtn = document.getElementById("checkBtn");
+  const slotsEl = document.getElementById("slots");
+  const statusEl = document.getElementById("status");
+
+  // poner por defecto "mañana"
+  (function setDefaultDate() {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const iso = d.toISOString().slice(0,10);
+    dateEl.value = iso;
+    dateEl.min = new Date().toISOString().slice(0,10);
+  })();
+
+  function setStatus(msg, type) {
+    statusEl.className = type === "err" ? "err" : type === "ok" ? "ok" : "";
+    statusEl.textContent = msg || "";
+  }
+
+  function clearSlots() {
+    slotsEl.innerHTML = "";
+  }
+
+  function renderSlots(slots) {
+    clearSlots();
+    if (!slots || slots.length === 0) {
+      setStatus("No hay horas disponibles con esos parámetros. Prueba otro día o una duración distinta.", "err");
+      return;
+    }
+
+    setStatus("Selecciona una hora:", "ok");
+
+    for (const s of slots) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "slot";
+      btn.textContent = s;
+      btn.onclick = () => {
+        // En el paso 8, esto abrirá el checkout: por ahora solo mostramos confirmación
+        alert(`Has elegido ${dateEl.value} a las ${s} · ${boatsEl.value} barco(s) · ${durationEl.value}h`);
+      };
+      slotsEl.appendChild(btn);
+    }
+  }
+
+  async function fetchAvailability() {
+    const date = dateEl.value;
+    const duration = durationEl.value;
+    const boats = boatsEl.value;
+
+    if (!N8N_AVAILABILITY_URL || N8N_AVAILABILITY_URL.includes("PEGA_AQUI")) {
+      setStatus("Falta configurar la URL del webhook de n8n en el código (N8N_AVAILABILITY_URL).", "err");
+      return;
+    }
+    if (!date) {
+      setStatus("Selecciona un día.", "err");
+      return;
+    }
+
+    setStatus("Consultando disponibilidad…", "");
+    clearSlots();
+    checkBtn.disabled = true;
+
+    try {
+      const url = new URL(N8N_AVAILABILITY_URL);
+      url.searchParams.set("date", date);
+      url.searchParams.set("duration", duration);
+      url.searchParams.set("boats", boats);
+
+      const res = await fetch(url.toString(), { method: "GET" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json();
+      const slots = data.available_slots || [];
+      renderSlots(slots);
+    } catch (err) {
+      setStatus("Error consultando disponibilidad. Revisa que el webhook esté activo y sea público.", "err");
+      console.error(err);
+    } finally {
+      checkBtn.disabled = false;
+    }
+  }
+
+  checkBtn.addEventListener("click", fetchAvailability);
+</script>
+</body>
+</html>
