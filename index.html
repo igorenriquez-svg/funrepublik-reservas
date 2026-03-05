@@ -11,18 +11,50 @@
     h1 { font-size: 22px; margin: 0 0 6px; }
     p { margin: 0 0 14px; color:#c7d2fe; line-height: 1.35; }
     label { display:block; font-size: 13px; color:#c7d2fe; margin: 10px 0 6px; }
-    select, input[type="date"] { width:100%; padding:12px; border-radius:12px; border:1px solid #334155; background:#0b1220; color:#eef2ff; }
+    select, input[type="date"], input[type="text"], input[type="tel"], input[type="number"] {
+      width:100%; padding:12px; border-radius:12px; border:1px solid #334155; background:#0b1220; color:#eef2ff;
+      box-sizing: border-box;
+    }
     button { width:100%; padding:12px; margin-top: 12px; border:0; border-radius:12px; background:#4f46e5; color:white; font-weight:600; cursor:pointer; }
     button:disabled { opacity:.6; cursor:not-allowed; }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
     .slots { display:flex; flex-wrap:wrap; gap:10px; margin-top: 14px; }
-    .slot { padding:10px 12px; border-radius:999px; border:1px solid #334155; background:#0b1220; color:#eef2ff; cursor:pointer; }
+    .slot {
+      width:auto;
+      padding:10px 12px; border-radius:999px; border:1px solid #334155; background:#0b1220; color:#eef2ff; cursor:pointer;
+      margin-top: 0;
+    }
     .slot:hover { border-color:#818cf8; }
     .note { font-size: 12px; color:#a5b4fc; margin-top: 10px; }
     .err { color:#fecaca; margin-top: 10px; font-size: 13px; }
     .ok { color:#bbf7d0; margin-top: 10px; font-size: 13px; }
     .footer { margin-top: 14px; font-size: 12px; color:#94a3b8; }
     .pill { display:inline-block; padding:6px 10px; border-radius:999px; background:#0b1220; border:1px solid #334155; color:#c7d2fe; font-size:12px; }
+
+    /* Modal */
+    .modalBack {
+      position: fixed; inset: 0; background: rgba(0,0,0,.55);
+      display: none; align-items: center; justify-content: center;
+      padding: 18px;
+    }
+    .modal {
+      width: 100%;
+      max-width: 520px;
+      background:#0f172a;
+      border: 1px solid #1f2937;
+      border-radius: 16px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.5);
+      padding: 16px;
+    }
+    .modal h2 { margin: 0 0 8px; font-size: 18px; }
+    .modal .sub { margin: 0 0 12px; color:#c7d2fe; font-size: 13px; line-height: 1.35; }
+    .modalActions { display:flex; gap:10px; margin-top: 12px; }
+    .btnGhost {
+      background:#0b1220; border:1px solid #334155; color:#eef2ff;
+    }
+    .muted { color:#a5b4fc; font-size: 12px; margin-top: 8px; }
+    .divider { height:1px; background:#1f2937; margin: 10px 0; }
+    .small { font-size: 12px; color:#a5b4fc; }
   </style>
 </head>
 
@@ -68,15 +100,49 @@
       <div id="slots" class="slots"></div>
 
       <div class="footer">
-        Al seleccionar una hora, en el siguiente paso pediremos nombre y personas y luego se realizará el pago del depósito.
+        Al seleccionar una hora, pediremos nombre y número de personas y se creará un HOLD (bloqueo temporal) antes del pago.
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modalBack" class="modalBack" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h2>Completar datos</h2>
+      <p class="sub" id="modalSummary">—</p>
+      <div class="divider"></div>
+
+      <div class="row">
+        <div>
+          <label for="name">Nombre</label>
+          <input id="name" type="text" placeholder="Tu nombre" autocomplete="name" />
+        </div>
+        <div>
+          <label for="pax">Personas</label>
+          <input id="pax" type="number" min="1" step="1" value="4" />
+        </div>
+      </div>
+
+      <label for="phone">Teléfono</label>
+      <input id="phone" type="tel" placeholder="+34 600 000 000" autocomplete="tel" />
+
+      <div id="modalStatus" class="small"></div>
+
+      <div class="modalActions">
+        <button id="cancelBtn" type="button" class="btnGhost">Cancelar</button>
+        <button id="confirmBtn" type="button">Crear HOLD</button>
+      </div>
+
+      <div class="muted">
+        El HOLD bloquea el/los barcos durante unos minutos para evitar overbooking. Luego vendrá el pago del depósito.
       </div>
     </div>
   </div>
 
 <script>
-  // ✅ CAMBIA ESTA LÍNEA por tu URL real del webhook (sin la query)
-  // Ejemplo: "https://TU-N8N.railway.app/webhook/fr-availability"
+  // Endpoints
   const N8N_AVAILABILITY_URL = "https://primary-production-beb9e.up.railway.app/webhook/fr-availability";
+  const N8N_HOLD_URL         = "https://primary-production-beb9e.up.railway.app/webhook/fr-hold";
 
   const boatsEl = document.getElementById("boats");
   const durationEl = document.getElementById("duration");
@@ -85,12 +151,24 @@
   const slotsEl = document.getElementById("slots");
   const statusEl = document.getElementById("status");
 
+  // Modal elements
+  const modalBack = document.getElementById("modalBack");
+  const modalSummary = document.getElementById("modalSummary");
+  const modalStatus = document.getElementById("modalStatus");
+  const nameEl = document.getElementById("name");
+  const paxEl = document.getElementById("pax");
+  const phoneEl = document.getElementById("phone");
+  const cancelBtn = document.getElementById("cancelBtn");
+  const confirmBtn = document.getElementById("confirmBtn");
+
+  // Store selected slot
+  let selectedSlot = null; // { date, time, boats, duration }
+
   // poner por defecto "mañana"
   (function setDefaultDate() {
     const d = new Date();
     d.setDate(d.getDate() + 1);
-    const iso = d.toISOString().slice(0,10);
-    dateEl.value = iso;
+    dateEl.value = d.toISOString().slice(0,10);
     dateEl.min = new Date().toISOString().slice(0,10);
   })();
 
@@ -99,12 +177,57 @@
     statusEl.textContent = msg || "";
   }
 
+  function setModalStatus(msg, type) {
+    modalStatus.className = type === "err" ? "err" : type === "ok" ? "ok" : "small";
+    modalStatus.textContent = msg || "";
+  }
+
   function clearSlots() {
     slotsEl.innerHTML = "";
   }
 
+  function openModal(slot) {
+    selectedSlot = slot;
+
+    modalSummary.textContent =
+      `${slot.date} · ${slot.time} · ${slot.boats} barco(s) · ${slot.duration}h`;
+
+    setModalStatus("", "");
+    nameEl.value = nameEl.value || "";
+    phoneEl.value = phoneEl.value || "";
+    if (!paxEl.value) paxEl.value = "4";
+
+    modalBack.style.display = "flex";
+    setTimeout(() => nameEl.focus(), 0);
+  }
+
+  function closeModal() {
+    modalBack.style.display = "none";
+    selectedSlot = null;
+    confirmBtn.disabled = false;
+    cancelBtn.disabled = false;
+  }
+
+  function sanitizePhone(phone) {
+    // deja + y dígitos
+    return (phone || "").trim().replace(/[^\d+]/g, "");
+  }
+
+  function validateModal() {
+    const name = (nameEl.value || "").trim();
+    const phone = sanitizePhone(phoneEl.value);
+    const pax = Number(paxEl.value);
+
+    if (!name) return { ok:false, error:"Escribe tu nombre." };
+    if (!phone || phone.length < 8) return { ok:false, error:"Escribe un teléfono válido." };
+    if (!Number.isFinite(pax) || pax < 1) return { ok:false, error:"Indica número de personas (mínimo 1)." };
+
+    return { ok:true, name, phone, pax };
+  }
+
   function renderSlots(slots) {
     clearSlots();
+
     if (!slots || slots.length === 0) {
       setStatus("No hay horas disponibles con esos parámetros. Prueba otro día o una duración distinta.", "err");
       return;
@@ -117,10 +240,16 @@
       btn.type = "button";
       btn.className = "slot";
       btn.textContent = s;
+
       btn.onclick = () => {
-        // En el paso 8, esto abrirá el checkout: por ahora solo mostramos confirmación
-        alert(`Has elegido ${dateEl.value} a las ${s} · ${boatsEl.value} barco(s) · ${durationEl.value}h`);
+        openModal({
+          date: dateEl.value,
+          time: s,
+          duration: Number(durationEl.value),
+          boats: Number(boatsEl.value)
+        });
       };
+
       slotsEl.appendChild(btn);
     }
   }
@@ -130,10 +259,6 @@
     const duration = durationEl.value;
     const boats = boatsEl.value;
 
-    if (!N8N_AVAILABILITY_URL || N8N_AVAILABILITY_URL.includes("PEGA_AQUI")) {
-      setStatus("Falta configurar la URL del webhook de n8n en el código (N8N_AVAILABILITY_URL).", "err");
-      return;
-    }
     if (!date) {
       setStatus("Selecciona un día.", "err");
       return;
@@ -155,15 +280,107 @@
       const data = await res.json();
       const slots = data.available_slots || [];
       renderSlots(slots);
+
     } catch (err) {
       setStatus("Error consultando disponibilidad. Revisa que el webhook esté activo y sea público.", "err");
       console.error(err);
+
     } finally {
       checkBtn.disabled = false;
     }
   }
 
+  async function createHold(payload) {
+    const res = await fetch(N8N_HOLD_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+
+    if (!res.ok) {
+      const msg = data?.error || data?.message || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+
+    return data;
+  }
+
+  async function onConfirmHold() {
+    if (!selectedSlot) return;
+
+    const v = validateModal();
+    if (!v.ok) {
+      setModalStatus(v.error, "err");
+      return;
+    }
+
+    const payload = {
+      date: selectedSlot.date,
+      time: selectedSlot.time,
+      duration: selectedSlot.duration,
+      boats: selectedSlot.boats,
+      name: v.name,
+      pax: v.pax,
+      phone: v.phone
+    };
+
+    setModalStatus("Creando HOLD…", "");
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+
+    try {
+      const result = await createHold(payload);
+
+      // Soporta 2 estilos de respuesta:
+      // 1) ok:true
+      // 2) devuelve directamente hold_event_id sin ok
+      const ok = (result && (result.ok === true || result.hold_event_id));
+      if (!ok) {
+        const msg = result?.error || "No se pudo crear el HOLD (respuesta inesperada).";
+        throw new Error(msg);
+      }
+
+      const holdId = result.hold_event_id || result.id || "OK";
+      setModalStatus(`HOLD creado ✔ (${holdId})`, "ok");
+
+      // Cierra modal y refresca disponibilidad para reflejar el bloqueo
+      setTimeout(() => {
+        closeModal();
+        fetchAvailability();
+      }, 700);
+
+      // Aquí, en el siguiente paso, redirigirás a Stripe con un checkout_url
+      // ej: window.location.href = result.checkout_url;
+
+    } catch (err) {
+      console.error(err);
+      setModalStatus(`Error: ${err.message}`, "err");
+      confirmBtn.disabled = false;
+      cancelBtn.disabled = false;
+    }
+  }
+
+  // events
   checkBtn.addEventListener("click", fetchAvailability);
+  confirmBtn.addEventListener("click", onConfirmHold);
+
+  cancelBtn.addEventListener("click", () => {
+    closeModal();
+  });
+
+  // cerrar modal click fuera
+  modalBack.addEventListener("click", (e) => {
+    if (e.target === modalBack) closeModal();
+  });
+
+  // cerrar con Escape
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modalBack.style.display === "flex") closeModal();
+  });
 </script>
 </body>
 </html>
