@@ -31,6 +31,29 @@
     .footer { margin-top: 14px; font-size: 12px; color:#94a3b8; }
     .pill { display:inline-block; padding:6px 10px; border-radius:999px; background:#0b1220; border:1px solid #334155; color:#c7d2fe; font-size:12px; }
 
+    .priceBox {
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid #334155;
+      background:#0b1220;
+    }
+    .priceLabel {
+      font-size: 12px;
+      color:#a5b4fc;
+      margin-bottom: 6px;
+    }
+    .priceValue {
+      font-size: 28px;
+      font-weight: 700;
+      color:#eef2ff;
+    }
+    .priceSub {
+      margin-top: 4px;
+      font-size: 12px;
+      color:#94a3b8;
+    }
+
     /* Modal */
     .modalBack {
       position: fixed; inset: 0; background: rgba(0,0,0,.55);
@@ -54,7 +77,19 @@
     }
     .muted { color:#a5b4fc; font-size: 12px; margin-top: 8px; }
     .divider { height:1px; background:#1f2937; margin: 10px 0; }
-    .small { font-size: 12px; color:#a5b4fc; }
+    .small { font-size: 12px; color:#a5b4fc; margin-top: 8px; }
+
+    .phoneRow {
+      display:grid;
+      grid-template-columns: 140px 1fr;
+      gap:10px;
+    }
+
+    @media (max-width: 640px) {
+      .row { grid-template-columns: 1fr; }
+      .phoneRow { grid-template-columns: 1fr; }
+      .modalActions { flex-direction: column; }
+    }
   </style>
 </head>
 
@@ -85,6 +120,12 @@
         </div>
       </div>
 
+      <div class="priceBox">
+        <div class="priceLabel">Precio estimado</div>
+        <div id="priceValue" class="priceValue">€600</div>
+        <div id="priceSub" class="priceSub">1 barco · 4 horas</div>
+      </div>
+
       <label for="date">Día</label>
       <input id="date" type="date" />
 
@@ -94,13 +135,14 @@
         <span class="pill">Horario: 10:00–18:00</span>
         <span class="pill">Turnos a en punto</span>
         <span class="pill">Vuelta al muelle a las 18:00</span>
+        <span class="pill">Máximo 5 personas por barco</span>
       </div>
 
       <div id="status"></div>
       <div id="slots" class="slots"></div>
 
       <div class="footer">
-        Al seleccionar una hora, pediremos nombre y número de personas y se creará un HOLD (bloqueo temporal) antes del pago.
+        Al seleccionar una hora, pediremos nombre, teléfono y número de personas y se creará un HOLD temporal antes del pago.
       </div>
     </div>
   </div>
@@ -119,13 +161,40 @@
         </div>
         <div>
           <label for="pax">Personas</label>
-          <input id="pax" type="number" min="1" step="1" value="4" />
+          <input id="pax" type="number" min="1" max="5" step="1" value="4" />
         </div>
       </div>
 
-      <label for="phone">Teléfono</label>
-      <input id="phone" type="tel" placeholder="+34 600 000 000" autocomplete="tel" />
+      <label>Teléfono</label>
+      <div class="phoneRow">
+        <select id="phonePrefix">
+          <option value="+34" selected>🇪🇸 +34</option>
+          <option value="+33">🇫🇷 +33</option>
+          <option value="+39">🇮🇹 +39</option>
+          <option value="+44">🇬🇧 +44</option>
+          <option value="+49">🇩🇪 +49</option>
+          <option value="+31">🇳🇱 +31</option>
+          <option value="+32">🇧🇪 +32</option>
+          <option value="+41">🇨🇭 +41</option>
+          <option value="+351">🇵🇹 +351</option>
+          <option value="+1">🇺🇸/🇨🇦 +1</option>
+          <option value="+52">🇲🇽 +52</option>
+          <option value="+54">🇦🇷 +54</option>
+          <option value="+55">🇧🇷 +55</option>
+          <option value="+57">🇨🇴 +57</option>
+          <option value="+58">🇻🇪 +58</option>
+          <option value="+212">🇲🇦 +212</option>
+          <option value="+213">🇩🇿 +213</option>
+          <option value="+216">🇹🇳 +216</option>
+          <option value="+20">🇪🇬 +20</option>
+          <option value="+221">🇸🇳 +221</option>
+          <option value="+240">🇬🇶 +240</option>
+        </select>
 
+        <input id="phone" type="tel" placeholder="600000000" autocomplete="tel" />
+      </div>
+
+      <div class="small" id="modalPriceText"></div>
       <div id="modalStatus" class="small"></div>
 
       <div class="modalActions">
@@ -134,15 +203,14 @@
       </div>
 
       <div class="muted">
-        El HOLD bloquea el/los barcos durante unos minutos para evitar overbooking. Luego vendrá el pago del depósito.
+        El HOLD bloquea el/los barcos durante unos minutos para evitar overbooking. Después irá el paso del pago.
       </div>
     </div>
   </div>
 
 <script>
-  // Endpoints
   const N8N_AVAILABILITY_URL = "https://primary-production-beb9e.up.railway.app/webhook/fr-availability";
-  const N8N_HOLD_URL         = "https://primary-production-beb9e.up.railway.app/webhook/fr-hold";
+  const N8N_HOLD_URL = "https://primary-production-beb9e.up.railway.app/webhook/fr-hold";
 
   const boatsEl = document.getElementById("boats");
   const durationEl = document.getElementById("duration");
@@ -151,26 +219,59 @@
   const slotsEl = document.getElementById("slots");
   const statusEl = document.getElementById("status");
 
-  // Modal elements
+  const priceValueEl = document.getElementById("priceValue");
+  const priceSubEl = document.getElementById("priceSub");
+
   const modalBack = document.getElementById("modalBack");
   const modalSummary = document.getElementById("modalSummary");
   const modalStatus = document.getElementById("modalStatus");
+  const modalPriceText = document.getElementById("modalPriceText");
   const nameEl = document.getElementById("name");
   const paxEl = document.getElementById("pax");
+  const phonePrefixEl = document.getElementById("phonePrefix");
   const phoneEl = document.getElementById("phone");
   const cancelBtn = document.getElementById("cancelBtn");
   const confirmBtn = document.getElementById("confirmBtn");
 
-  // Store selected slot
-  let selectedSlot = null; // { date, time, boats, duration }
+  let selectedSlot = null;
 
-  // poner por defecto "mañana"
+  // PRECIOS OFICIALES POR BARCO
+  const PRICE_TABLE = {
+    2: 129,
+    3: 149,
+    4: 179,
+    6: 229,
+    8: 279
+  };
+
   (function setDefaultDate() {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     dateEl.value = d.toISOString().slice(0,10);
     dateEl.min = new Date().toISOString().slice(0,10);
   })();
+
+  function getPrice(duration, boats) {
+    const base = PRICE_TABLE[Number(duration)] || 0;
+    return base * Number(boats);
+  }
+
+  function formatPrice(value) {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0
+    }).format(value);
+  }
+
+  function updatePriceDisplay() {
+    const duration = Number(durationEl.value);
+    const boats = Number(boatsEl.value);
+    const price = getPrice(duration, boats);
+
+    priceValueEl.textContent = formatPrice(price);
+    priceSubEl.textContent = `${boats} barco(s) · ${duration} hora(s)`;
+  }
 
   function setStatus(msg, type) {
     statusEl.className = type === "err" ? "err" : type === "ok" ? "ok" : "";
@@ -189,13 +290,13 @@
   function openModal(slot) {
     selectedSlot = slot;
 
+    const totalPrice = getPrice(slot.duration, slot.boats);
+
     modalSummary.textContent =
       `${slot.date} · ${slot.time} · ${slot.boats} barco(s) · ${slot.duration}h`;
 
+    modalPriceText.textContent = `Precio estimado: ${formatPrice(totalPrice)}`;
     setModalStatus("", "");
-    nameEl.value = nameEl.value || "";
-    phoneEl.value = phoneEl.value || "";
-    if (!paxEl.value) paxEl.value = "4";
 
     modalBack.style.display = "flex";
     setTimeout(() => nameEl.focus(), 0);
@@ -209,20 +310,30 @@
   }
 
   function sanitizePhone(phone) {
-    // deja + y dígitos
-    return (phone || "").trim().replace(/[^\d+]/g, "");
+    return (phone || "").replace(/\D/g, "");
   }
 
   function validateModal() {
     const name = (nameEl.value || "").trim();
-    const phone = sanitizePhone(phoneEl.value);
-    const pax = Number(paxEl.value);
+    const prefix = phonePrefixEl.value;
+    const phoneRaw = sanitizePhone(phoneEl.value);
+    let pax = Number(paxEl.value);
 
     if (!name) return { ok:false, error:"Escribe tu nombre." };
-    if (!phone || phone.length < 8) return { ok:false, error:"Escribe un teléfono válido." };
-    if (!Number.isFinite(pax) || pax < 1) return { ok:false, error:"Indica número de personas (mínimo 1)." };
+    if (!phoneRaw || phoneRaw.length < 6) return { ok:false, error:"Escribe un teléfono válido." };
+    if (!Number.isFinite(pax) || pax < 1) return { ok:false, error:"Indica al menos 1 persona." };
 
-    return { ok:true, name, phone, pax };
+    if (pax > 5) {
+      pax = 5;
+      paxEl.value = 5;
+    }
+
+    return {
+      ok:true,
+      name,
+      phone: `${prefix}${phoneRaw}`,
+      pax
+    };
   }
 
   function renderSlots(slots) {
@@ -280,11 +391,9 @@
       const data = await res.json();
       const slots = data.available_slots || [];
       renderSlots(slots);
-
     } catch (err) {
       setStatus("Error consultando disponibilidad. Revisa que el webhook esté activo y sea público.", "err");
       console.error(err);
-
     } finally {
       checkBtn.disabled = false;
     }
@@ -299,7 +408,12 @@
 
     const text = await res.text();
     let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
 
     if (!res.ok) {
       const msg = data?.error || data?.message || `HTTP ${res.status}`;
@@ -325,7 +439,8 @@
       boats: selectedSlot.boats,
       name: v.name,
       pax: v.pax,
-      phone: v.phone
+      phone: v.phone,
+      price: getPrice(selectedSlot.duration, selectedSlot.boats)
     };
 
     setModalStatus("Creando HOLD…", "");
@@ -334,27 +449,19 @@
 
     try {
       const result = await createHold(payload);
+      const ok = result && (result.ok === true || result.hold_event_id);
 
-      // Soporta 2 estilos de respuesta:
-      // 1) ok:true
-      // 2) devuelve directamente hold_event_id sin ok
-      const ok = (result && (result.ok === true || result.hold_event_id));
       if (!ok) {
-        const msg = result?.error || "No se pudo crear el HOLD (respuesta inesperada).";
+        const msg = result?.error || "No se pudo crear el HOLD.";
         throw new Error(msg);
       }
 
-      const holdId = result.hold_event_id || result.id || "OK";
-      setModalStatus(`HOLD creado ✔ (${holdId})`, "ok");
+      setModalStatus("HOLD creado correctamente ✔", "ok");
 
-      // Cierra modal y refresca disponibilidad para reflejar el bloqueo
       setTimeout(() => {
         closeModal();
         fetchAvailability();
-      }, 700);
-
-      // Aquí, en el siguiente paso, redirigirás a Stripe con un checkout_url
-      // ej: window.location.href = result.checkout_url;
+      }, 800);
 
     } catch (err) {
       console.error(err);
@@ -364,23 +471,28 @@
     }
   }
 
-  // events
   checkBtn.addEventListener("click", fetchAvailability);
   confirmBtn.addEventListener("click", onConfirmHold);
+  cancelBtn.addEventListener("click", closeModal);
 
-  cancelBtn.addEventListener("click", () => {
-    closeModal();
+  boatsEl.addEventListener("change", updatePriceDisplay);
+  durationEl.addEventListener("change", updatePriceDisplay);
+
+  paxEl.addEventListener("input", () => {
+    const value = Number(paxEl.value);
+    if (value > 5) paxEl.value = 5;
+    if (value < 1 && paxEl.value !== "") paxEl.value = 1;
   });
 
-  // cerrar modal click fuera
   modalBack.addEventListener("click", (e) => {
     if (e.target === modalBack) closeModal();
   });
 
-  // cerrar con Escape
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && modalBack.style.display === "flex") closeModal();
   });
+
+  updatePriceDisplay();
 </script>
 </body>
 </html>
