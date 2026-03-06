@@ -141,7 +141,7 @@
       <div id="slots" class="slots"></div>
 
       <div class="footer">
-        Al seleccionar una hora, pediremos nombre, teléfono y número total de personas y se creará un HOLD temporal antes del pago.
+        Al seleccionar una hora, pediremos nombre, teléfono y número total de personas y se creará la reserva.
       </div>
     </div>
   </div>
@@ -197,11 +197,11 @@
 
       <div class="modalActions">
         <button id="cancelBtn" type="button" class="btnGhost">Cancelar</button>
-        <button id="confirmBtn" type="button">Crear HOLD</button>
+        <button id="confirmBtn" type="button">Confirmar reserva</button>
       </div>
 
       <div class="muted">
-        El HOLD bloquea el/los barcos durante unos minutos para evitar overbooking. Después irá el paso del pago.
+        Al confirmar, registraremos la reserva y te mostraremos una pantalla final con todos los detalles.
       </div>
     </div>
   </div>
@@ -242,10 +242,12 @@
   };
 
   (function setDefaultDate() {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    dateEl.value = d.toISOString().slice(0, 10);
-    dateEl.min = new Date().toISOString().slice(0, 10);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    dateEl.value = tomorrow.toISOString().slice(0, 10);
+    dateEl.min = today.toISOString().slice(0, 10);
   })();
 
   function getPrice(duration, boats) {
@@ -262,7 +264,7 @@
       style: "currency",
       currency: "EUR",
       maximumFractionDigits: 0
-    }).format(value);
+    }).format(Number(value || 0));
   }
 
   function updatePriceDisplay() {
@@ -312,6 +314,7 @@
     modalPriceText.textContent = `Precio total: ${formatPrice(totalPrice)} · ${formatPrice(unitPrice)} por barco · Máximo ${maxPax} personas`;
 
     paxEl.max = String(maxPax);
+
     const currentValue = Number(paxEl.value);
     if (!paxEl.value || currentValue < 1 || currentValue > maxPax) {
       paxEl.value = String(Math.min(4, maxPax));
@@ -319,6 +322,7 @@
 
     setModalStatus("", "");
     modalBack.style.display = "flex";
+
     setTimeout(() => nameEl.focus(), 0);
   }
 
@@ -327,6 +331,7 @@
     selectedSlot = null;
     confirmBtn.disabled = false;
     cancelBtn.disabled = false;
+    setModalStatus("", "");
   }
 
   function sanitizePhone(phone) {
@@ -340,9 +345,9 @@
     const maxPax = selectedSlot ? getMaxPax(selectedSlot.boats) : getMaxPax();
     let pax = Number(paxEl.value);
 
-    if (!name) return { ok:false, error:"Escribe tu nombre." };
-    if (!phoneRaw || phoneRaw.length < 6) return { ok:false, error:"Escribe un teléfono válido." };
-    if (!Number.isFinite(pax) || pax < 1) return { ok:false, error:"Indica al menos 1 persona." };
+    if (!name) return { ok: false, error: "Escribe tu nombre." };
+    if (!phoneRaw || phoneRaw.length < 6) return { ok: false, error: "Escribe un teléfono válido." };
+    if (!Number.isFinite(pax) || pax < 1) return { ok: false, error: "Indica al menos 1 persona." };
 
     if (pax > maxPax) {
       pax = maxPax;
@@ -413,8 +418,8 @@
       const slots = data.available_slots || [];
       renderSlots(slots);
     } catch (err) {
-      setStatus("Error consultando disponibilidad. Revisa que el webhook esté activo y sea público.", "err");
       console.error(err);
+      setStatus("Error consultando disponibilidad. Revisa que el webhook esté activo y sea público.", "err");
     } finally {
       checkBtn.disabled = false;
     }
@@ -453,6 +458,8 @@
       return;
     }
 
+    const price = getPrice(selectedSlot.duration, selectedSlot.boats);
+
     const payload = {
       date: selectedSlot.date,
       time: selectedSlot.time,
@@ -461,28 +468,41 @@
       name: v.name,
       pax: v.pax,
       phone: v.phone,
-      price: getPrice(selectedSlot.duration, selectedSlot.boats)
+      price
     };
 
-    setModalStatus("Creando HOLD…", "");
+    setModalStatus("Creando reserva…", "");
     confirmBtn.disabled = true;
     cancelBtn.disabled = true;
 
     try {
       const result = await createHold(payload);
-      const ok = result && (result.ok === true || result.hold_event_id);
+      const ok = result && (result.ok === true || result.hold_event_id || result.id);
 
       if (!ok) {
-        const msg = result?.error || "No se pudo crear el HOLD.";
+        const msg = result?.error || "No se pudo crear la reserva.";
         throw new Error(msg);
       }
 
-      setModalStatus("HOLD creado correctamente ✔", "ok");
+      setModalStatus("Reserva creada correctamente ✔", "ok");
+
+      const holdId = result.hold_event_id || result.id || "";
+
+      const confirmUrl = new URL("./confirmacion.html", window.location.href);
+      confirmUrl.searchParams.set("hold_event_id", holdId);
+      confirmUrl.searchParams.set("name", v.name);
+      confirmUrl.searchParams.set("phone", v.phone);
+      confirmUrl.searchParams.set("date", selectedSlot.date);
+      confirmUrl.searchParams.set("time", selectedSlot.time);
+      confirmUrl.searchParams.set("duration", String(selectedSlot.duration));
+      confirmUrl.searchParams.set("boats", String(selectedSlot.boats));
+      confirmUrl.searchParams.set("pax", String(v.pax));
+      confirmUrl.searchParams.set("price", String(price));
 
       setTimeout(() => {
-        closeModal();
-        fetchAvailability();
-      }, 800);
+        window.location.href = confirmUrl.toString();
+      }, 700);
+
     } catch (err) {
       console.error(err);
       setModalStatus(`Error: ${err.message}`, "err");
