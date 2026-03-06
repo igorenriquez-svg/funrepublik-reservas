@@ -264,13 +264,14 @@
     }).format(value);
   }
 
-  function updatePriceDisplay() {
+   function updatePriceDisplay() {
     const duration = Number(durationEl.value);
     const boats = Number(boatsEl.value);
     const price = getPrice(duration, boats);
+    const unitPrice = PRICE_TABLE[duration] || 0;
 
     priceValueEl.textContent = formatPrice(price);
-    priceSubEl.textContent = `${boats} barco(s) · ${duration} hora(s)`;
+    priceSubEl.textContent = `${boats} barco(s) · ${duration} hora(s) · ${formatPrice(unitPrice)} por barco`;
   }
 
   function setStatus(msg, type) {
@@ -295,7 +296,9 @@
     modalSummary.textContent =
       `${slot.date} · ${slot.time} · ${slot.boats} barco(s) · ${slot.duration}h`;
 
-    modalPriceText.textContent = `Precio estimado: ${formatPrice(totalPrice)}`;
+    const unitPrice = PRICE_TABLE[slot.duration] || 0;
+    modalPriceText.textContent = `Precio total: ${formatPrice(totalPrice)} · ${formatPrice(unitPrice)} por barco`;
+    
     setModalStatus("", "");
 
     modalBack.style.display = "flex";
